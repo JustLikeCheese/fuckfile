@@ -1,0 +1,28 @@
+# Compiled binaries
+fuckfile
+fuckfile.exe
+fuckfile-*
+
+# Object files
+*.o
+*.obj
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+artifacts/
