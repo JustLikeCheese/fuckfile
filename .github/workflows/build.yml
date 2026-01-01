@@ -1,14 +1,27 @@
 name: Build fuckfile
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      build_windows:
+        description: 'Build Windows'
+        required: true
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build Linux'
+        required: true
+        type: boolean
+        default: true
+      build_android:
+        description: 'Build Android'
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   build-linux-x64:
+    if: ${{ inputs.build_linux }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +38,7 @@ jobs:
           path: fuckfile-linux-x64
 
   build-linux-x86:
+    if: ${{ inputs.build_linux }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +61,7 @@ jobs:
           path: fuckfile-linux-x86
 
   build-linux-arm64:
+    if: ${{ inputs.build_linux }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +83,7 @@ jobs:
           path: fuckfile-linux-arm64
 
   build-linux-armv7:
+    if: ${{ inputs.build_linux }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +105,7 @@ jobs:
           path: fuckfile-linux-armv7
 
   build-windows-x64:
+    if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +127,7 @@ jobs:
           path: fuckfile-windows-x64.exe
 
   build-windows-x86:
+    if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,6 +152,7 @@ jobs:
           path: fuckfile-windows-x86.exe
 
   build-windows-arm64:
+    if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +174,7 @@ jobs:
           path: fuckfile-windows-arm64.exe
 
   build-android:
+    if: ${{ inputs.build_android }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -191,3 +211,116 @@ jobs:
         with:
           name: ${{ matrix.output }}
           path: ${{ matrix.output }}
+
+  package-windows:
+    if: ${{ inputs.build_windows }}
+    needs: [build-windows-x64, build-windows-x86, build-windows-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuckfile-windows-*
+          path: windows-artifacts
+          merge-multiple: true
+      
+      - name: Create Windows package
+        run: |
+          cd windows-artifacts
+          zip -r ../fuckfile-windows-all.zip *
+      
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-windows-all
+          path: fuckfile-windows-all.zip
+
+  package-linux:
+    if: ${{ inputs.build_linux }}
+    needs: [build-linux-x64, build-linux-x86, build-linux-arm64, build-linux-armv7]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuckfile-linux-*
+          path: linux-artifacts
+          merge-multiple: true
+      
+      - name: Create Linux package
+        run: |
+          cd linux-artifacts
+          tar -czf ../fuckfile-linux-all.tar.gz *
+      
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-linux-all
+          path: fuckfile-linux-all.tar.gz
+
+  package-android:
+    if: ${{ inputs.build_android }}
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuckfile-android-*
+          path: android-artifacts
+          merge-multiple: true
+      
+      - name: Create Android package
+        run: |
+          cd android-artifacts
+          zip -r ../fuckfile-android-all.zip *
+      
+      - name: Upload Android package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-android-all
+          path: fuckfile-android-all.zip
+
+  package-all:
+    needs: [package-windows, package-linux, package-android]
+    if: |
+      always() && 
+      (needs.package-windows.result == 'success' || 
+       needs.package-linux.result == 'success' || 
+       needs.package-android.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuckfile-*-all
+          path: all-artifacts
+      
+      - name: Download individual artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuckfile-*
+          path: individual-artifacts
+      
+      - name: Create complete package
+        run: |
+          mkdir -p fuckfiles
+          
+          # Copy platform packages
+          find all-artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
+            cp "$file" fuckfiles/
+          done
+          
+          # Copy individual binaries
+          find individual-artifacts -type f \( -name "fuckfile-*" -o -name "*.exe" \) | while read file; do
+            cp "$file" fuckfiles/
+          done
+          
+          cd fuckfiles
+          zip -r ../fuckfiles.zip *
+      
+      - name: Upload complete package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfiles
+          path: fuckfiles.zip
