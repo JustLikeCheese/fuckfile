@@ -1,0 +1,135 @@
+name: Build fuckfile
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, i686, aarch64, armv7]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+      
+      - name: Build Linux x86_64
+        if: matrix.arch == 'x86_64'
+        run: |
+          gcc -o fuckfile-linux-x64 main.c -O2 -static
+          strip fuckfile-linux-x64
+      
+      - name: Build Linux i686
+        if: matrix.arch == 'i686'
+        run: |
+          gcc -m32 -o fuckfile-linux-x86 main.c -O2 -static
+          strip fuckfile-linux-x86
+      
+      - name: Build Linux ARM64
+        if: matrix.arch == 'aarch64'
+        run: |
+          aarch64-linux-gnu-gcc -o fuckfile-linux-arm64 main.c -O2 -static
+          aarch64-linux-gnu-strip fuckfile-linux-arm64
+      
+      - name: Build Linux ARMv7
+        if: matrix.arch == 'armv7'
+        run: |
+          arm-linux-gnueabihf-gcc -o fuckfile-linux-armv7 main.c -O2 -static
+          arm-linux-gnueabihf-strip fuckfile-linux-armv7
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-linux-${{ matrix.arch }}
+          path: fuckfile-linux-*
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, x86, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      
+      - name: Build Windows
+        run: |
+          cl /O2 main.c /Fe:fuckfile-windows-${{ matrix.arch }}.exe
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-windows-${{ matrix.arch }}
+          path: fuckfile-windows-${{ matrix.arch }}.exe
+
+  build-android:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: arm64-v8a
+            abi: aarch64-linux-android
+            api: 21
+            output: fuckfile-android-arm64
+          - arch: armeabi-v7a
+            abi: armv7a-linux-androideabi
+            api: 21
+            output: fuckfile-android-armv7
+          - arch: x86_64
+            abi: x86_64-linux-android
+            api: 21
+            output: fuckfile-android-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26c
+      
+      - name: Build Android
+        run: |
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.abi }}${{ matrix.api }}-clang \
+            -o ${{ matrix.output }} main.c -O2 -static
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip ${{ matrix.output }}
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+
+  create-release:
+    needs: [build-linux, build-windows, build-android]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
