@@ -8,39 +8,76 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux:
+  build-linux-x64:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, i686, aarch64, armv7]
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-      
       - name: Build Linux x86_64
-        if: matrix.arch == 'x86_64'
         run: |
           gcc -o fuckfile-linux-x64 main.c -O2 -static
           strip fuckfile-linux-x64
       
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-linux-x64
+          path: fuckfile-linux-x64
+
+  build-linux-x86:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install 32-bit libraries
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
+      
       - name: Build Linux i686
-        if: matrix.arch == 'i686'
         run: |
           gcc -m32 -o fuckfile-linux-x86 main.c -O2 -static
           strip fuckfile-linux-x86
       
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-linux-x86
+          path: fuckfile-linux-x86
+
+  build-linux-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install ARM64 cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      
       - name: Build Linux ARM64
-        if: matrix.arch == 'aarch64'
         run: |
           aarch64-linux-gnu-gcc -o fuckfile-linux-arm64 main.c -O2 -static
           aarch64-linux-gnu-strip fuckfile-linux-arm64
       
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-linux-arm64
+          path: fuckfile-linux-arm64
+
+  build-linux-armv7:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install ARMv7 cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+      
       - name: Build Linux ARMv7
-        if: matrix.arch == 'armv7'
         run: |
           arm-linux-gnueabihf-gcc -o fuckfile-linux-armv7 main.c -O2 -static
           arm-linux-gnueabihf-strip fuckfile-linux-armv7
@@ -48,31 +85,74 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-linux-${{ matrix.arch }}
-          path: fuckfile-linux-*
+          name: fuckfile-linux-armv7
+          path: fuckfile-linux-armv7
 
-  build-windows:
+  build-windows-x64:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x64, x86, arm64]
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ matrix.arch }}
+          arch: x64
       
-      - name: Build Windows
+      - name: Build Windows x64
         run: |
-          cl /O2 main.c /Fe:fuckfile-windows-${{ matrix.arch }}.exe
+          cl /O2 main.c /Fe:fuckfile-windows-x64.exe
+        shell: cmd
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-windows-${{ matrix.arch }}
-          path: fuckfile-windows-${{ matrix.arch }}.exe
+          name: fuckfile-windows-x64
+          path: fuckfile-windows-x64.exe
+
+  build-windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: mingw-w64-i686-gcc
+      
+      - name: Build Windows x86
+        shell: msys2 {0}
+        run: |
+          gcc -o fuckfile-windows-x86.exe main.c -O2 -static
+          strip fuckfile-windows-x86.exe
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-windows-x86
+          path: fuckfile-windows-x86.exe
+
+  build-windows-arm64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup MSVC ARM64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+      
+      - name: Build Windows ARM64
+        run: |
+          cl /O2 main.c /Fe:fuckfile-windows-arm64.exe
+        shell: cmd
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckfile-windows-arm64
+          path: fuckfile-windows-arm64.exe
 
   build-android:
     runs-on: ubuntu-latest
@@ -98,6 +178,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26c
+          add-to-path: true
       
       - name: Build Android
         run: |
@@ -110,26 +191,3 @@ jobs:
         with:
           name: ${{ matrix.output }}
           path: ${{ matrix.output }}
-
-  create-release:
-    needs: [build-linux, build-windows, build-android]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
-          draft: false
-          prerelease: false
-          files: artifacts/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
