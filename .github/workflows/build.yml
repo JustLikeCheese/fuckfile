@@ -18,309 +18,323 @@ on:
         required: true
         type: boolean
         default: true
+      run_tests:
+        description: 'Run Tests'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
-  build-linux-x64:
+  # === 1. Build Stage ===
+  build-linux:
     if: ${{ inputs.build_linux }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Build Linux x86_64
+      # Phase 1: ARM Builds (Install -> Build -> Uninstall)
+      - name: Build ARM (Linux)
         run: |
-          gcc -o fuckfile-linux-x64 main.c -O2 -static
-          strip fuckfile-linux-x64
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuckfile-linux-x64
-          path: fuckfile-linux-x64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+            
+          echo "Building ARM64..."
+          aarch64-linux-gnu-gcc -o fuckfile-linux-arm64 main.c -O2 -static
+          aarch64-linux-gnu-strip fuckfile-linux-arm64
+          chmod +x fuckfile-linux-arm64
+          
+          echo "Building ARMv7..."
+          arm-linux-gnueabihf-gcc -o fuckfile-linux-armv7 main.c -O2 -static
+          arm-linux-gnueabihf-strip fuckfile-linux-armv7
+          chmod +x fuckfile-linux-armv7
+          
+          # Clean up
+          sudo apt-get remove -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          sudo apt-get autoremove -y
 
-  build-linux-x86:
-    if: ${{ inputs.build_linux }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install 32-bit libraries
+      # Phase 2: x86/x64 Builds
+      - name: Build x86/x64 (Linux)
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
-      
-      - name: Build Linux i686
-        run: |
+          sudo apt-get install -y gcc-multilib
+          
+          echo "Building x64..."
+          gcc -o fuckfile-linux-x64 main.c -O2 -static
+          strip fuckfile-linux-x64
+          chmod +x fuckfile-linux-x64
+          
+          echo "Building x86..."
           gcc -m32 -o fuckfile-linux-x86 main.c -O2 -static
           strip fuckfile-linux-x86
+          chmod +x fuckfile-linux-x86
       
-      - name: Upload artifact
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-linux-x86
-          path: fuckfile-linux-x86
+          name: tmp-linux
+          path: fuckfile-linux-*
+          retention-days: 1
 
-  build-linux-arm64:
-    if: ${{ inputs.build_linux }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install ARM64 cross-compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-      
-      - name: Build Linux ARM64
-        run: |
-          aarch64-linux-gnu-gcc -o fuckfile-linux-arm64 main.c -O2 -static
-          aarch64-linux-gnu-strip fuckfile-linux-arm64
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuckfile-linux-arm64
-          path: fuckfile-linux-arm64
-
-  build-linux-armv7:
-    if: ${{ inputs.build_linux }}
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install ARMv7 cross-compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-      
-      - name: Build Linux ARMv7
-        run: |
-          arm-linux-gnueabihf-gcc -o fuckfile-linux-armv7 main.c -O2 -static
-          arm-linux-gnueabihf-strip fuckfile-linux-armv7
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuckfile-linux-armv7
-          path: fuckfile-linux-armv7
-
-  build-windows-x64:
+  build-windows-mingw:
     if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-      
-      - name: Build Windows x64
-        run: |
-          cl /O2 main.c /Fe:fuckfile-windows-x64.exe
-        shell: cmd
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuckfile-windows-x64
-          path: fuckfile-windows-x64.exe
-
-  build-windows-x86:
-    if: ${{ inputs.build_windows }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW32
+          msystem: MINGW64
           update: true
-          install: mingw-w64-i686-gcc
-      
-      - name: Build Windows x86
+          install: mingw-w64-x86_64-gcc mingw-w64-i686-gcc
+      - name: Build
         shell: msys2 {0}
         run: |
-          gcc -o fuckfile-windows-x86.exe main.c -O2 -static
-          strip fuckfile-windows-x86.exe
-      
-      - name: Upload artifact
+          chmod +x build/windows.sh
+          ./build/windows.sh
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-windows-x86
-          path: fuckfile-windows-x86.exe
+          name: tmp-windows-mingw
+          path: fuckfile-windows-*.exe
+          retention-days: 1
 
   build-windows-arm64:
     if: ${{ inputs.build_windows }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
       - name: Setup MSVC ARM64
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64_arm64
-      
-      - name: Build Windows ARM64
-        run: |
-          cl /O2 main.c /Fe:fuckfile-windows-arm64.exe
+      - name: Build
         shell: cmd
-      
-      - name: Upload artifact
+        run: build\windows.cmd
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-windows-arm64
+          name: tmp-windows-arm64
           path: fuckfile-windows-arm64.exe
+          retention-days: 1
 
   build-android:
     if: ${{ inputs.build_android }}
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: arm64-v8a
-            abi: aarch64-linux-android
-            api: 21
-            output: fuckfile-android-arm64
-          - arch: armeabi-v7a
-            abi: armv7a-linux-androideabi
-            api: 21
-            output: fuckfile-android-armv7
-          - arch: x86_64
-            abi: x86_64-linux-android
-            api: 21
-            output: fuckfile-android-x86_64
     steps:
       - uses: actions/checkout@v4
-      
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26c
           add-to-path: true
-      
-      - name: Build Android
+      - name: Build
         run: |
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.abi }}${{ matrix.api }}-clang \
-            -o ${{ matrix.output }} main.c -O2 -static
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip ${{ matrix.output }}
-      
-      - name: Upload artifact
+          chmod +x build/android.sh
+          ./build/android.sh
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.output }}
-          path: ${{ matrix.output }}
+          name: tmp-android
+          path: fuckfile-android-*
+          retention-days: 1
 
-  package-windows:
-    if: ${{ inputs.build_windows }}
-    needs: [build-windows-x64, build-windows-x86, build-windows-arm64]
+  # === 2. Test Stage ===
+  test-linux:
+    if: ${{ inputs.run_tests && inputs.build_linux }}
+    needs: [build-linux]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x64, x86, arm64, armv7]
     steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          pattern: fuckfile-windows-*
-          path: windows-artifacts
-          merge-multiple: true
-      
-      - name: Create Windows package
+          name: tmp-linux
+      - name: Test
         run: |
-          cd windows-artifacts
-          zip -r ../fuckfile-windows-all.zip *
-      
-      - name: Upload Windows package
-        uses: actions/upload-artifact@v4
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-user-static xxd
+          chmod +x fuckfile-linux-* test/linux.sh
+          # 2>&1 ensures errors are captured in the log
+          ./test/linux.sh ${{ matrix.arch }} fuckfile-linux-${{ matrix.arch }} > test-linux-${{ matrix.arch }}.log 2>&1
+      - uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-windows-all
-          path: fuckfile-windows-all.zip
+          name: log-linux-${{ matrix.arch }}
+          path: test-linux-${{ matrix.arch }}.log
+          retention-days: 1
 
-  package-linux:
-    if: ${{ inputs.build_linux }}
-    needs: [build-linux-x64, build-linux-x86, build-linux-arm64, build-linux-armv7]
-    runs-on: ubuntu-latest
+  test-windows:
+    if: ${{ inputs.run_tests && inputs.build_windows }}
+    needs: [build-windows-mingw, build-windows-arm64]
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, x86, arm64]
     steps:
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: matrix.arch != 'arm64'
         with:
-          pattern: fuckfile-linux-*
-          path: linux-artifacts
-          merge-multiple: true
-      
-      - name: Create Linux package
+          name: tmp-windows-mingw
+      - uses: actions/download-artifact@v4
+        if: matrix.arch == 'arm64'
+        with:
+          name: tmp-windows-arm64
+      - name: Test
+        shell: pwsh
         run: |
-          cd linux-artifacts
-          tar -czf ../fuckfile-linux-all.tar.gz *
-      
-      - name: Upload Linux package
-        uses: actions/upload-artifact@v4
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            "Skipping native run on ARM64, generating placeholder log" | Out-File test-windows-arm64.log
+          } else {
+            # Use Write-Output in PS script to capture logs
+            .\test\windows.ps1 -Arch ${{ matrix.arch }} -Binary fuckfile-windows-${{ matrix.arch }}.exe | Out-File -FilePath test-windows-${{ matrix.arch }}.log -Encoding UTF8
+          }
+      - uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-linux-all
-          path: fuckfile-linux-all.tar.gz
+          name: log-windows-${{ matrix.arch }}
+          path: test-windows-${{ matrix.arch }}.log
+          retention-days: 1
 
-  package-android:
-    if: ${{ inputs.build_android }}
+  test-android:
+    if: ${{ inputs.run_tests && inputs.build_android }}
     needs: [build-android]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Don't stop other tests if one fails
+      matrix:
+        include:
+          - arch: arm64
+            binary: fuckfile-android-arm64
+          - arch: armv7
+            binary: fuckfile-android-armv7
+          - arch: x86_64
+            binary: fuckfile-android-x86_64
     steps:
-      - name: Download Android artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          pattern: fuckfile-android-*
-          path: android-artifacts
-          merge-multiple: true
-      
-      - name: Create Android package
+          name: tmp-android
+      - name: Test
         run: |
-          cd android-artifacts
-          zip -r ../fuckfile-android-all.zip *
-      
-      - name: Upload Android package
-        uses: actions/upload-artifact@v4
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-user-static xxd
+          chmod +x fuckfile-android-* test/android.sh
+          
+          # Force pipefail so failures are detected
+          set -o pipefail
+          
+          echo "Running test for ${{ matrix.arch }}..."
+          # Capture stderr (2>&1) to see crashes
+          if ! ./test/android.sh ${{ matrix.arch }} ${{ matrix.binary }} > test-android-${{ matrix.arch }}.log 2>&1; then
+            echo "::error::Test failed for ${{ matrix.arch }}"
+            cat test-android-${{ matrix.arch }}.log
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
         with:
-          name: fuckfile-android-all
-          path: fuckfile-android-all.zip
+          name: log-android-${{ matrix.arch }}
+          path: test-android-${{ matrix.arch }}.log
+          retention-days: 1
 
-  package-all:
-    needs: [package-windows, package-linux, package-android]
-    if: |
-      always() && 
-      (needs.package-windows.result == 'success' || 
-       needs.package-linux.result == 'success' || 
-       needs.package-android.result == 'success')
+  # === 3. Distribution Stage ===
+  distribute:
+    needs: [build-linux, build-windows-mingw, build-windows-arm64, build-android, test-linux, test-windows, test-android]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Download all platform packages
+      - name: Create directories
+        run: mkdir -p dist/android dist/windows dist/linux dist/logs_tmp
+
+      # --- Download Artifacts ---
+      - name: Collect Android
+        if: inputs.build_android
         uses: actions/download-artifact@v4
         with:
-          pattern: fuckfile-*-all
-          path: all-artifacts
-      
-      - name: Download individual artifacts
+          name: tmp-android
+          path: dist/android
+
+      - name: Collect Windows MinGW
+        if: inputs.build_windows
         uses: actions/download-artifact@v4
         with:
-          pattern: fuckfile-*
-          path: individual-artifacts
-      
-      - name: Create complete package
+          name: tmp-windows-mingw
+          path: dist/windows
+
+      - name: Collect Windows ARM64
+        if: inputs.build_windows
+        uses: actions/download-artifact@v4
+        with:
+          name: tmp-windows-arm64
+          path: dist/windows
+
+      - name: Collect Linux
+        if: inputs.build_linux
+        uses: actions/download-artifact@v4
+        with:
+          name: tmp-linux
+          path: dist/linux
+
+      - name: Collect Logs
+        if: inputs.run_tests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: log-*
+          path: dist/logs_tmp
+          merge-multiple: true
+
+      # --- Merge Logs ---
+      - name: Merge Logs to Single File
+        if: inputs.run_tests
         run: |
-          mkdir -p fuckfiles
+          echo "=== fuckfile Test Summary ===" > test-summary.txt
+          echo "Date: $(date)" >> test-summary.txt
+          echo "" >> test-summary.txt
           
-          # Copy platform packages
-          find all-artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
-            cp "$file" fuckfiles/
+          for log in dist/logs_tmp/*.log; do
+            if [ -f "$log" ]; then
+              echo "#################################################" >> test-summary.txt
+              echo "Log File: $(basename $log)" >> test-summary.txt
+              echo "#################################################" >> test-summary.txt
+              cat "$log" >> test-summary.txt
+              echo "" >> test-summary.txt
+              echo "" >> test-summary.txt
+            fi
           done
-          
-          # Copy individual binaries
-          find individual-artifacts -type f \( -name "fuckfile-*" -o -name "*.exe" \) | while read file; do
-            cp "$file" fuckfiles/
-          done
-          
-          cd fuckfiles
-          zip -r ../fuckfiles.zip *
-      
-      - name: Upload complete package
+
+      # --- Cleanup ---
+      - name: Delete Temporary Artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: |
+            tmp-*
+            log-*
+
+      # --- Final Upload ---
+      - name: Upload Android Binary
+        if: inputs.build_android
         uses: actions/upload-artifact@v4
         with:
-          name: fuckfiles
-          path: fuckfiles.zip
+          name: android-binary
+          path: dist/android/*
+
+      - name: Upload Windows Binary
+        if: inputs.build_windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/windows/*
+
+      - name: Upload Linux Binary
+        if: inputs.build_linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/linux/*
+
+      - name: Upload Test Summary
+        if: inputs.run_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test-summary.txt
