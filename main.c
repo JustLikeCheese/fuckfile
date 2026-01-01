@@ -17,33 +17,49 @@
     #define PATH_SEPARATOR '/'
 #endif
 
-int confirm_fuck() {
+typedef struct {
+    int recursive;
+    int force;
+    int preserve_time;
+    int preserve_size;
+    int dry_run;
+} Options;
+
+int confirm_fuck(const char* path, Options* opts) {
     char input[256];
-    int count = 0;
     
-    printf("\nWARNING: This will DESTROY file contents!\n");
-    printf("Type 'fuck' three times to confirm:\n");
-    
-    for (int i = 0; i < 3; i++) {
-        printf("%d/3: ", i + 1);
-        if (fgets(input, sizeof(input), stdin) == NULL) {
-            return 0;
-        }
-        
-        input[strcspn(input, "\n")] = 0;
-        
-        if (strcmp(input, "fuck") == 0) {
-            count++;
-        } else {
-            printf("Cancelled.\n");
-            return 0;
-        }
+    if (opts->force) {
+        return 1;
     }
     
-    return count == 3;
+    printf("Do you want fuck the file `%s` (y/n)? ", path);
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 0;
+    }
+    
+    input[strcspn(input, "\n")] = 0;
+    
+    if (strcmp(input, "y") != 0 && strcmp(input, "Y") != 0) {
+        printf("Cancelled.\n");
+        return 0;
+    }
+    
+    printf("Please type 'fuck' to confirm: ");
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 0;
+    }
+    
+    input[strcspn(input, "\n")] = 0;
+    
+    if (strcmp(input, "fuck") != 0) {
+        printf("Cancelled.\n");
+        return 0;
+    }
+    
+    return 1;
 }
 
-int fuck_file(const char* path) {
+int fuck_file(const char* path, Options* opts) {
     struct stat st;
     
     if (stat(path, &st) != 0) {
@@ -53,6 +69,24 @@ int fuck_file(const char* path) {
     
     if (S_ISDIR(st.st_mode)) {
         fprintf(stderr, "Skipping directory: %s\n", path);
+        return 0;
+    }
+    
+    if (opts->dry_run) {
+        char abs_path[4096];
+#ifdef _WIN32
+        if (_fullpath(abs_path, path, sizeof(abs_path)) != NULL) {
+            printf("[DRY RUN] Would fuck: %s\n", abs_path);
+        } else {
+            printf("[DRY RUN] Would fuck: %s\n", path);
+        }
+#else
+        if (realpath(path, abs_path) != NULL) {
+            printf("[DRY RUN] Would fuck: %s\n", abs_path);
+        } else {
+            printf("[DRY RUN] Would fuck: %s\n", path);
+        }
+#endif
         return 0;
     }
     
@@ -66,62 +100,80 @@ int fuck_file(const char* path) {
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     
-    size_t buffer_size = 1024 * 1024;
-    unsigned char* buffer = (unsigned char*)calloc(buffer_size, 1);
-    if (!buffer) {
-        fclose(f);
-        fprintf(stderr, "Memory allocation failed\n");
-        return 1;
-    }
+    long write_size = opts->preserve_size ? size : 0;
     
-    long remaining = size;
-    while (remaining > 0) {
-        size_t to_write = remaining > buffer_size ? buffer_size : remaining;
-        if (fwrite(buffer, 1, to_write, f) != to_write) {
-            fprintf(stderr, "Write failed for: %s\n", path);
-            free(buffer);
+    if (write_size > 0) {
+        size_t buffer_size = 1024 * 1024;
+        unsigned char* buffer = (unsigned char*)calloc(buffer_size, 1);
+        if (!buffer) {
             fclose(f);
+            fprintf(stderr, "Memory allocation failed\n");
             return 1;
         }
-        remaining -= to_write;
+        
+        long remaining = write_size;
+        while (remaining > 0) {
+            size_t to_write = remaining > buffer_size ? buffer_size : remaining;
+            if (fwrite(buffer, 1, to_write, f) != to_write) {
+                fprintf(stderr, "Write failed for: %s\n", path);
+                free(buffer);
+                fclose(f);
+                return 1;
+            }
+            remaining -= to_write;
+        }
+        
+        free(buffer);
     }
     
-    free(buffer);
     fclose(f);
     
+    if (!opts->preserve_size && write_size == 0) {
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(path, FILE_WRITE_ATTRIBUTES, 
-                               FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        FILETIME ft;
-        SYSTEMTIME st_sys;
-        struct tm* timeinfo = localtime(&st.st_mtime);
-        
-        st_sys.wYear = timeinfo->tm_year + 1900;
-        st_sys.wMonth = timeinfo->tm_mon + 1;
-        st_sys.wDay = timeinfo->tm_mday;
-        st_sys.wHour = timeinfo->tm_hour;
-        st_sys.wMinute = timeinfo->tm_min;
-        st_sys.wSecond = timeinfo->tm_sec;
-        st_sys.wMilliseconds = 0;
-        
-        SystemTimeToFileTime(&st_sys, &ft);
-        SetFileTime(hFile, NULL, NULL, &ft);
-        CloseHandle(hFile);
-    }
+        HANDLE hFile = CreateFileA(path, GENERIC_WRITE, 0, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(hFile);
+        }
 #else
-    struct utimbuf times;
-    times.actime = st.st_atime;
-    times.modtime = st.st_mtime;
-    utime(path, &times);
+        truncate(path, 0);
 #endif
+    }
     
-    printf("Fucked: %s (%ld bytes)\n", path, size);
+    if (opts->preserve_time) {
+#ifdef _WIN32
+        HANDLE hFile = CreateFileA(path, FILE_WRITE_ATTRIBUTES, 
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            FILETIME ft;
+            SYSTEMTIME st_sys;
+            struct tm* timeinfo = localtime(&st.st_mtime);
+            
+            st_sys.wYear = timeinfo->tm_year + 1900;
+            st_sys.wMonth = timeinfo->tm_mon + 1;
+            st_sys.wDay = timeinfo->tm_mday;
+            st_sys.wHour = timeinfo->tm_hour;
+            st_sys.wMinute = timeinfo->tm_min;
+            st_sys.wSecond = timeinfo->tm_sec;
+            st_sys.wMilliseconds = 0;
+            
+            SystemTimeToFileTime(&st_sys, &ft);
+            SetFileTime(hFile, NULL, NULL, &ft);
+            CloseHandle(hFile);
+        }
+#else
+        struct utimbuf times;
+        times.actime = st.st_atime;
+        times.modtime = st.st_mtime;
+        utime(path, &times);
+#endif
+    }
+    
+    printf("Fucked: %s (%ld bytes)\n", path, opts->preserve_size ? size : 0);
     return 0;
 }
 
-int fuck_directory(const char* path) {
+int fuck_directory(const char* path, Options* opts) {
 #ifdef _WIN32
     WIN32_FIND_DATAA find_data;
     char search_path[MAX_PATH];
@@ -143,9 +195,9 @@ int fuck_directory(const char* path) {
         snprintf(full_path, sizeof(full_path), "%s\\%s", path, find_data.cFileName);
         
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            fuck_directory(full_path);
+            fuck_directory(full_path, opts);
         } else {
-            fuck_file(full_path);
+            fuck_file(full_path, opts);
         }
     } while (FindNextFileA(hFind, &find_data));
     
@@ -170,9 +222,9 @@ int fuck_directory(const char* path) {
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                fuck_directory(full_path);
+                fuck_directory(full_path, opts);
             } else {
-                fuck_file(full_path);
+                fuck_file(full_path, opts);
             }
         }
     }
@@ -184,12 +236,18 @@ int fuck_directory(const char* path) {
 
 void print_usage(const char* prog) {
     printf("fuckfile - Overwrite files with NULL bytes\n");
-    printf("Usage: %s [-r] <file|directory>\n", prog);
-    printf("  -r    Recursively process directories\n");
+    printf("Usage: %s [options] <file|directory>\n\n", prog);
+    printf("Options:\n");
+    printf("  -r, -R    Recursively process directories\n");
+    printf("  -f, -F    Force mode, no confirmation prompts\n");
+    printf("  -t, -T    Do not preserve file modification time\n");
+    printf("  -s, -S    Do not preserve file size (truncate to 0 bytes)\n");
+    printf("  -a, -A    Aggressive mode (equivalent to -t -s)\n");
+    printf("  -d, -D    Dry run, show what would be done without actually doing it\n");
 }
 
 int main(int argc, char* argv[]) {
-    int recursive = 0;
+    Options opts = {0, 0, 1, 1, 0};
     char* target = NULL;
     
     if (argc < 2) {
@@ -198,8 +256,23 @@ int main(int argc, char* argv[]) {
     }
     
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-r") == 0) {
-            recursive = 1;
+        if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "-R") == 0) {
+            opts.recursive = 1;
+        } else if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "-F") == 0) {
+            opts.force = 1;
+        } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "-T") == 0) {
+            opts.preserve_time = 0;
+        } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "-S") == 0) {
+            opts.preserve_size = 0;
+        } else if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "-A") == 0) {
+            opts.preserve_time = 0;
+            opts.preserve_size = 0;
+        } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "-D") == 0) {
+            opts.dry_run = 1;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
         } else {
             target = argv[i];
         }
@@ -210,10 +283,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    if (!confirm_fuck()) {
-        return 0;
-    }
-    
     struct stat st;
     if (stat(target, &st) != 0) {
         fprintf(stderr, "Cannot access: %s\n", target);
@@ -221,13 +290,22 @@ int main(int argc, char* argv[]) {
     }
     
     if (S_ISDIR(st.st_mode)) {
-        if (!recursive) {
+        if (!opts.recursive) {
             fprintf(stderr, "Use -r flag to process directories\n");
             return 1;
         }
-        return fuck_directory(target);
+        
+        if (!confirm_fuck(target, &opts)) {
+            return 0;
+        }
+        
+        return fuck_directory(target, &opts);
     } else {
-        return fuck_file(target);
+        if (!confirm_fuck(target, &opts)) {
+            return 0;
+        }
+        
+        return fuck_file(target, &opts);
     }
     
     return 0;
