@@ -1,3 +1,14 @@
 The Fuck
 
-Nothing, just fuck your files.
+Nothing, just fuck files.
+
+fuckfile - overwrite files with NULL bytes
+Usage: fuckfile-windows-x64.exe [options] <file|directory>
+
+Options:
+-r, -R Recursively process directories
+-f, -F Force mode, no confirmation prompts
+-t, -T Do not preserve file modification time
+-s, -S Do not preserve file size (truncate to 0 bytes)
+-a, -A Aggressive mode (equivalent to -t -s)
+-d, -D Dry run, show what would be done without actually doing it
